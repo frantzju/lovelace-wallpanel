@@ -249,6 +249,7 @@ const defaultConfig = {
 	image_order: 'sorted', // sorted / random
 	image_excludes: [],
 	image_background: 'color', // color / image
+	on_video_playback_end: "repeat", // repeat / pause / next
 	touch_zone_size_next_image: 15,
 	touch_zone_size_previous_image: 15,
 	show_progress_bar: false,
@@ -2527,7 +2528,57 @@ class WallpanelView extends HuiView {
 		if (typeof activeElem.play !== "function") {
 			return; // Not playable element.
 		}
+		activeElem.loop = !["pause", "next"].includes(config.on_video_playback_end)
+
+		let playbackListeners;
+		const cleanupListeners = () => {
+			if (playbackListeners) {
+				Object.entries(playbackListeners).forEach(([event, handler]) => {
+					activeElem.removeEventListener(event, handler);
+				});
+				playbackListeners == null;
+			}
+		};
+
+		if (config.on_video_playback_end === "next") {
+			// Switch to next image at the end of the playback.
+			const onTimeUpdate = () => {
+				if (this.getActiveImageElement() !== activeElem) {
+					cleanupListeners();
+					return;
+				}
+				// If the media has played enough and is near the end.
+				if (activeElem.currentTime > config.crossfade_time) {
+					const remainingTime = activeElem.duration - activeElem.currentTime;
+					if (remainingTime <= config.crossfade_time) {
+						this.switchActiveImage();
+						cleanupListeners();
+					}
+				}
+			};
+			const onMediaEnded = () => {
+				if (this.getActiveImageElement() === activeElem) {
+					this.switchActiveImage();
+				}
+				cleanupListeners();
+			};
+			const onMediaPause = () => {
+				cleanupListeners();
+			};
+
+			playbackListeners = {
+				timeupdate: onTimeUpdate,
+				ended: onMediaEnded,
+				pause: onMediaPause,
+			};
+			Object.entries(playbackListeners).forEach(([event, handler]) => {
+				activeElem.addEventListener(event, handler);
+			});
+		}
+
+		// Start playing the media.
 		activeElem.play().catch((e) => {
+			cleanupListeners();
 			logger.error(`Failed to play media "${activeElem.src}":`, e);
 		});
 	}
